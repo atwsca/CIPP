@@ -13,23 +13,25 @@ import {
 import { Field, Form, FormSpy } from 'react-final-form'
 import { RFFCFormRadioList, RFFSelectSearch } from 'src/components/forms'
 import { useGenericGetRequestQuery, useLazyGenericPostRequestQuery } from 'src/store/api/app'
-import { CippPage } from 'src/components/layout'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import Skeleton from 'react-loading-skeleton'
 import { TenantSelectorMultiple, ModalService, CippOffcanvas } from 'src/components/utilities'
 import PropTypes from 'prop-types'
 import { OnChange } from 'react-final-form-listeners'
 import { useListTenantsQuery } from 'src/store/api/tenants'
-import CippListOffcanvas, { OffcanvasListSection } from 'src/components/utilities/CippListOffcanvas'
+import { OffcanvasListSection } from 'src/components/utilities/CippListOffcanvas'
 import CippButtonCard from 'src/components/contentcards/CippButtonCard'
 
 const SettingsCustomRoles = () => {
   const [genericPostRequest, postResults] = useLazyGenericPostRequestQuery()
   const [selectedTenant, setSelectedTenant] = useState([])
+  const [blockedTenants, setBlockedTenants] = useState([])
   const tenantSelectorRef = useRef()
+  const blockedTenantSelectorRef = useRef()
   const { data: tenants = [], tenantsFetching } = useListTenantsQuery({
     showAllTenantSelector: true,
   })
+  const [allTenantSelected, setAllTenantSelected] = useState(false)
+  const [cippApiRoleSelected, setCippApiRoleSelected] = useState(false)
 
   const {
     data: apiPermissions = [],
@@ -48,6 +50,28 @@ const SettingsCustomRoles = () => {
     path: 'api/ExecCustomRole',
   })
 
+  const handleTenantChange = (e) => {
+    var alltenant = false
+    e.map((tenant) => {
+      if (tenant.value === 'AllTenants') {
+        alltenant = true
+      }
+    })
+    if (alltenant && blockedTenants.length === 0) {
+      setAllTenantSelected(true)
+    } else {
+      setAllTenantSelected(false)
+    }
+    setSelectedTenant(e)
+  }
+
+  const handleBlockedTenantChange = (e) => {
+    setBlockedTenants(e)
+    if (e.length > 0) {
+      setAllTenantSelected(false)
+    }
+  }
+
   const handleSubmit = async (values) => {
     //filter on only objects that are 'true'
     genericPostRequest({
@@ -56,6 +80,7 @@ const SettingsCustomRoles = () => {
         RoleName: values.RoleName.value,
         Permissions: values.Permissions,
         AllowedTenants: selectedTenant.map((tenant) => tenant.value),
+        BlockedTenants: blockedTenants.map((tenant) => tenant.value),
       },
     }).then(() => {
       refetchCustomRoleList()
@@ -92,22 +117,41 @@ const SettingsCustomRoles = () => {
                   let customRole = customRoleList.filter(function (obj) {
                     return obj.RowKey === value.value
                   })
+                  if (customRole[0]?.RowKey === 'CIPP-API') {
+                    setCippApiRoleSelected(true)
+                  } else {
+                    setCippApiRoleSelected(false)
+                  }
+
                   if (customRole === undefined || customRole === null || customRole.length === 0) {
                     return false
                   } else {
                     if (set === 'AllowedTenants') {
                       setSelectedTenant(customRole[0][set])
-                      var selectedTenants = []
+                      var selectedTenantList = []
                       tenants.map((tenant) => {
                         if (customRole[0][set].includes(tenant.customerId)) {
-                          selectedTenants.push({
+                          selectedTenantList.push({
                             label: tenant.displayName,
                             value: tenant.customerId,
                           })
                         }
                       })
 
-                      tenantSelectorRef.current.setValue(selectedTenants)
+                      tenantSelectorRef.current.setValue(selectedTenantList)
+                    } else if (set === 'BlockedTenants') {
+                      setBlockedTenants(customRole[0][set])
+                      var blockedTenantList = []
+                      tenants.map((tenant) => {
+                        if (customRole[0][set].includes(tenant.customerId)) {
+                          blockedTenantList.push({
+                            label: tenant.displayName,
+                            value: tenant.customerId,
+                          })
+                        }
+                      })
+
+                      blockedTenantSelectorRef.current.setValue(blockedTenantList)
                     } else {
                       onChange(customRole[0][set])
                     }
@@ -255,6 +299,13 @@ const SettingsCustomRoles = () => {
                         />
                         <WhenFieldChanges field="RoleName" set="Permissions" />
                         <WhenFieldChanges field="RoleName" set="AllowedTenants" />
+                        <WhenFieldChanges field="RoleName" set="BlockedTenants" />
+                        {cippApiRoleSelected && (
+                          <CCallout color="info">
+                            This role will limit access for the CIPP-API integration. It is not
+                            intended to be used for users.
+                          </CCallout>
+                        )}
                       </div>
                       <div className="mb-3">
                         <h5>Allowed Tenants</h5>
@@ -263,9 +314,25 @@ const SettingsCustomRoles = () => {
                           values={selectedTenant}
                           AllTenants={true}
                           valueIsDomain={true}
-                          onChange={(e) => setSelectedTenant(e)}
+                          onChange={(e) => handleTenantChange(e)}
+                        />
+                        {allTenantSelected && (
+                          <CCallout color="warning">
+                            All tenants selected, no tenant restrictions will be applied.
+                          </CCallout>
+                        )}
+                      </div>
+                      <div className="mb-3">
+                        <h5>Blocked Tenants</h5>
+                        <TenantSelectorMultiple
+                          ref={blockedTenantSelectorRef}
+                          values={blockedTenants}
+                          AllTenants={false}
+                          valueIsDomain={true}
+                          onChange={(e) => handleBlockedTenantChange(e)}
                         />
                       </div>
+
                       <h5>API Permissions</h5>
                       <CRow className="mt-4 px-2">
                         <CCol md={4}>
@@ -333,9 +400,19 @@ const SettingsCustomRoles = () => {
                             <>
                               {values['RoleName'] && selectedTenant.length > 0 && (
                                 <>
-                                  <h5>Selected Tenants</h5>
+                                  <h5>Allowed Tenants</h5>
                                   <ul>
                                     {selectedTenant.map((tenant, idx) => (
+                                      <li key={idx}>{tenant.label}</li>
+                                    ))}
+                                  </ul>
+                                </>
+                              )}
+                              {values['RoleName'] && blockedTenants.length > 0 && (
+                                <>
+                                  <h5>Blocked Tenants</h5>
+                                  <ul>
+                                    {blockedTenants.map((tenant, idx) => (
                                       <li key={idx}>{tenant.label}</li>
                                     ))}
                                   </ul>
@@ -346,13 +423,15 @@ const SettingsCustomRoles = () => {
                                   <h5>Selected Permissions</h5>
                                   <ul>
                                     {values['Permissions'] &&
-                                      Object.keys(values['Permissions'])?.map((cat, idx) => (
-                                        <>
-                                          {!values['Permissions'][cat].includes('None') && (
-                                            <li key={idx}>{values['Permissions'][cat]}</li>
-                                          )}
-                                        </>
-                                      ))}
+                                      Object.keys(values['Permissions'])
+                                        ?.sort()
+                                        .map((cat, idx) => (
+                                          <>
+                                            {!values['Permissions'][cat].includes('None') && (
+                                              <li key={idx}>{values['Permissions'][cat]}</li>
+                                            )}
+                                          </>
+                                        ))}
                                   </ul>
                                 </>
                               )}
